@@ -87,18 +87,67 @@ class TrainingArguments(transformers.TrainingArguments):
     )
 
 
-def safe_save_model_for_hf_trainer(trainer: transformers.Trainer,
-                                   output_dir: str):
-    """Collects the state dict and dump to disk."""
-    state_dict = trainer.model.state_dict()
-    if trainer.args.should_save:
-        cpu_state_dict = {
-            key: value.cpu()
-            for key, value in state_dict.items()
-        }
-        del state_dict
-        trainer._save(output_dir, state_dict=cpu_state_dict)  # noqa
+# def safe_save_model_for_hf_trainer(trainer: transformers.Trainer,
+#                                    output_dir: str):
+#     """Collects the state dict and dump to disk."""
+#     # FSDP-compatible saving: Use trainer's built-in save_model which handles FSDP properly
+#     if trainer.args.should_save:
+#         trainer.save_model(output_dir)
 
+
+def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
+    """
+    Robust save that works with FSDP:
+    - materialize a FULL state_dict on CPU (offload_to_cpu=True)
+    - gather only on rank 0 (rank0_only=True)
+    - save with safetensors to avoid PyTorch pickle shards
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Only rank 0 actually writes to disk
+    if not trainer.is_world_process_zero():
+        return
+
+    model = trainer.model
+    unwrap = transformers.trainer_utils.get_model if hasattr(transformers.trainer_utils, "get_model") else lambda m: m
+    base = unwrap(model)
+
+    # Try FSDP-aware CPU offload; fall back to normal saving if FSDP is not used.
+    try:
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        from torch.distributed.fsdp import StateDictType, FullStateDictConfig
+
+        # Clear some slack before consolidation to reduce fragmentation
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        cpu_cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+
+        # Build a FULL (unsharded) state_dict on CPU, rank-0 only
+        with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, cpu_cfg):
+            state_dict = base.state_dict()
+
+        # Write weights using safetensors; avoid optimizer to reduce memory pressure
+        base.save_pretrained(
+            output_dir,
+            state_dict=state_dict,
+            safe_serialization=True  # writes model.safetensors
+        )
+
+        # Save tokenizer & config like Trainer would
+        if trainer.tokenizer is not None:
+            trainer.tokenizer.save_pretrained(output_dir)
+        if hasattr(trainer, "args") and trainer.args is not None:
+            trainer.args.save(output_dir)
+
+    except Exception:
+        # Not FSDP (or import failed) -> use the vanilla path
+        # Still prefer safetensors if available
+        base.save_pretrained(output_dir, safe_serialization=True)
+        if trainer.tokenizer is not None:
+            trainer.tokenizer.save_pretrained(output_dir)
+        if hasattr(trainer, "args") and trainer.args is not None:
+            trainer.args.save(output_dir)
 
 def smart_tokenizer_and_embedding_resize(
     special_tokens_dict: Dict,

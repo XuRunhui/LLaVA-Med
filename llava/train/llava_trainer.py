@@ -23,6 +23,9 @@ def unwrap_model(model: nn.Module) -> nn.Module:
 class LLaVATrainer(Trainer):
 
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
+        # CRITICAL FIX: Clear GPU cache before saving to avoid OOM during checkpoint creation
+        torch.cuda.empty_cache()
+
         if getattr(self.args, 'tune_mm_mlp_adapter', False):
             # Save the model
             _state_dict = state_dict
@@ -35,7 +38,7 @@ class LLaVATrainer(Trainer):
             keys_to_match = ['mm_projector', 'embed_tokens', 'embed_in']
             for k, v in _state_dict.items():
                 if any(key_match in k for key_match in keys_to_match):
-                    weight_to_save[k] = v.cpu().clone().detach() # Chunyuan: to solve the saving OOM problem 
+                    weight_to_save[k] = v.cpu().clone().detach() # Chunyuan: to solve the saving OOM problem
 
             current_folder = output_dir.split('/')[-1]
             parent_folder = os.path.dirname(output_dir)
@@ -46,4 +49,6 @@ class LLaVATrainer(Trainer):
             else:
                 torch.save(weight_to_save, os.path.join(output_dir, f'mm_projector.bin'))
 
+        # Clear cache again before the main save
+        torch.cuda.empty_cache()
         super(LLaVATrainer, self)._save(output_dir, state_dict)
