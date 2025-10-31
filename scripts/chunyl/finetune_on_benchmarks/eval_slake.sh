@@ -46,13 +46,22 @@
 #     --image-folder /home/chunyl/azure_mount/hanoverdev/clwon/llava/eval/Slake1.0/images \
 #     --answers-file \
 #     /home/chunyl/research/output/llava/results/eval/Slake1.0/answer-file-llava-zeroshot.jsonl
+if [ $# -lt 1 ]; then
+    echo "Usage: bash $0 <EPOCH_NUMBER>"
+    exit 1
+fi
 
-python llava/eval/model_vqa_med.py --model-name /home/chunyl/research/models/llava/llava-vicuna-7b-pretrain_cc3m_595k_1e-instruct_158k-3epoch \
+NUM_EPOCHS=$1
+EVALUATION_FILE="/scratch1/runhuixu/outputs/slake/eval/test_result_$NUM_EPOCHS.jsonl"
+
+
+
+python /scratch1/runhuixu/LLaVA-Med/llava/eval/model_vqa_med.py  --model-name /scratch1/runhuixu/outputs/slake \
     --question-file \
-    /home/chunyl/azure_mount/hanoverdev/clwon/llava/eval/Slake1.0/train.json \
-    --image-folder /home/chunyl/azure_mount/hanoverdev/clwon/llava/eval/Slake1.0/images \
-    --answers-file \
-    /home/chunyl/research/output/llava/results/eval/Slake1.0/train-answer-file-llava-zeroshot.jsonl
+    /scratch1/runhuixu/datasets/SLAKE/Slake1.0/llava_test.json\
+    --image-folder /scratch1/runhuixu/datasets/SLAKE/Slake1.0/imgs \
+    --answers-file $EVALUATION_FILE
+    
 
 
 # python llava/eval/run_eval.py --gt /home/chunyl/azure_mount/hanoverdev/clwon/llava/eval/vqa_rad/test.json --candidate /home/chunyl/azure_mount/hanoverdev/clwon/llava/eval/data_RAD/train_open_answers.json --pred /home/chunyl/azure_mount/chunyleu_output/llava-med/llava-vicuna-7b/med-pretrain-364m-1epoch/finetune_e2e_on_instruct-3epoch/finetune_to_downstream_results/-3epoch/test-answer-file.jsonl
